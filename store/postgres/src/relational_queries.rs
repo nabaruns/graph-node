@@ -873,7 +873,9 @@ impl<'a> QueryFragment<Pg> for PrefixComparison<'a> {
 #[derive(Debug, Clone)]
 pub struct QueryFilter<'a> {
     filter: &'a EntityFilter,
+    layout: &'a Layout,
     table: &'a Table,
+    table_prefix: &'a str,
 }
 
 /// String representation that is useful for debugging when `walk_ast` fails
@@ -884,24 +886,126 @@ impl<'a> fmt::Display for QueryFilter<'a> {
 }
 
 impl<'a> QueryFilter<'a> {
-    pub fn new(filter: &'a EntityFilter, table: &'a Table) -> Result<Self, StoreError> {
-        Self::valid_attributes(filter, table)?;
-        Ok(QueryFilter { filter, table })
+    pub fn new(
+        filter: &'a EntityFilter,
+        table: &'a Table,
+        layout: &'a Layout,
+    ) -> Result<Self, StoreError> {
+        Self::valid_attributes(filter, table, layout, false)?;
+
+        Ok(QueryFilter {
+            filter,
+            table,
+            layout,
+            table_prefix: "c.",
+        })
     }
 
-    fn valid_attributes(filter: &'a EntityFilter, table: &'a Table) -> Result<(), StoreError> {
+    fn visit_child_filters(
+        &self,
+        block: BlockNumber,
+        filter: &'a EntityFilter,
+        mut out: AstPass<Pg>,
+    ) -> Result<(), StoreError> {
+        use EntityFilter::*;
+        Ok(match filter {
+            And(filters) | Or(filters) => {
+                for filter in filters {
+                    self.visit_child_filters(block, filter, out.reborrow())?;
+                }
+            }
+            Child(field_name, entity, child_filter) => {
+                // the root table is always the parent table (because we support only one level of nesting)
+                let parent_column = self.table.column_for_field(field_name)?;
+                let parent_prefix = "c".to_string();
+                let child_table = self.layout.table_for_entity(entity)?;
+                let child_column = child_table.primary_key();
+                let child_prefix = format!("c_{}", field_name);
+
+                fn push_column_with_prefix(
+                    mut out: AstPass<Pg>,
+                    column: &str,
+                    prefix: &String,
+                ) -> QueryResult<()> {
+                    out.push_sql(format!("{}.", prefix).as_str());
+                    out.push_identifier(column)?;
+
+                    Ok(())
+                }
+
+                out.push_sql("\n");
+
+                out.push_sql("inner join ");
+                out.push_sql(child_table.qualified_name.as_str());
+                out.push_sql(format!(" {}", child_prefix).as_str());
+
+                out.push_sql(" on (");
+
+                // Join by ID
+                push_column_with_prefix(out.reborrow(), child_column.name.as_str(), &child_prefix)?;
+                out.push_sql(" = ");
+                push_column_with_prefix(
+                    out.reborrow(),
+                    parent_column.name.as_str(),
+                    &parent_prefix,
+                )?;
+
+                out.push_sql(" AND ");
+
+                // Match by block
+                push_column_with_prefix(out.reborrow(), BLOCK_RANGE_COLUMN, &child_prefix)?;
+                out.push_sql(" @> ");
+                out.push_bind_param::<Integer, _>(&block)?;
+
+                out.push_sql(" )");
+
+                self.visit_child_filters(block, child_filter, out)?;
+            }
+            _ => {}
+        })
+    }
+
+    /// Creates a SQL fragment representing the table joins.
+    ///
+    ///   inner join child1 c1 ON ( c1.id = parent.child_id AND c1.block_range @> $block )
+    ///   inner join child2 c2 ON ( c2.id = parent.child_id AND c2.block_range @> $block )
+    ///
+    pub fn walk_joins_ast(&self, block: BlockNumber, mut out: AstPass<Pg>) -> QueryResult<()> {
+        out.unsafe_to_cache_prepared();
+        self.visit_child_filters(block, self.filter, out)
+            .map_err(|e| DieselError::QueryBuilderError(Box::new(e)))?;
+        Ok(())
+    }
+
+    fn valid_attributes(
+        filter: &'a EntityFilter,
+        table: &'a Table,
+        layout: &'a Layout,
+        child_filter_ancestor: bool,
+    ) -> Result<(), StoreError> {
         use EntityFilter::*;
         match filter {
             And(filters) | Or(filters) => {
                 for filter in filters {
-                    Self::valid_attributes(filter, table)?;
+                    Self::valid_attributes(filter, table, layout, child_filter_ancestor)?;
                 }
             }
-
+            Child(_, entity, child_filter) => {
+                if child_filter_ancestor {
+                    return Err(StoreError::QueryExecutionError(
+                        "Only a single level sub filter is allowed".to_string(),
+                    ));
+                }
+                Self::valid_attributes(
+                    child_filter,
+                    layout.table_for_entity(entity)?,
+                    layout,
+                    true,
+                )?;
+            }
             // This is a special case since we want to allow passing "block" column filter, but we dont
             // want to fail/error when this is passed here, since this column is not really an entity column.
             ChangeBlockGte(..) => {}
-
             Contains(attr, _)
             | ContainsNoCase(attr, _)
             | NotContains(attr, _)
@@ -932,7 +1036,32 @@ impl<'a> QueryFilter<'a> {
         QueryFilter {
             filter,
             table: self.table,
+            layout: self.layout,
+            table_prefix: self.table_prefix.clone(),
         }
+    }
+
+    fn child(
+        &self,
+        attribute: &Attribute,
+        entity_type: &'a EntityType,
+        filter: &'a EntityFilter,
+        out: AstPass<Pg>,
+    ) -> QueryResult<()> {
+        let table = self
+            .layout
+            .table_for_entity(entity_type)
+            .expect("Table for child entity not found");
+
+        let table_prefix = format!("c_{}.", attribute); // align it with a table prefix creation in visit_child_filters()
+        let query_filter = QueryFilter {
+            filter,
+            table,
+            layout: self.layout,
+            table_prefix: table_prefix.as_str(),
+        };
+
+        query_filter.walk_ast(out)
     }
 
     fn column(&self, attribute: &Attribute) -> &'a Column {
@@ -980,6 +1109,7 @@ impl<'a> QueryFilter<'a> {
         };
         match value {
             Value::String(s) => {
+                out.push_sql(self.table_prefix);
                 out.push_identifier(column.name.as_str())?;
                 out.push_sql(operation);
                 if s.starts_with('%') || s.ends_with('%') {
@@ -993,6 +1123,7 @@ impl<'a> QueryFilter<'a> {
                 out.push_sql("position(");
                 out.push_bind_param::<Binary, _>(&b.as_slice())?;
                 out.push_sql(" in ");
+                out.push_sql(&self.table_prefix);
                 out.push_identifier(column.name.as_str())?;
                 if negated {
                     out.push_sql(") = 0")
@@ -1003,9 +1134,11 @@ impl<'a> QueryFilter<'a> {
             Value::List(_) => {
                 if negated {
                     out.push_sql(" not ");
+                    out.push_sql(&self.table_prefix);
                     out.push_identifier(column.name.as_str())?;
                     out.push_sql(" && ");
                 } else {
+                    out.push_sql(&self.table_prefix);
                     out.push_identifier(column.name.as_str())?;
                     out.push_sql(" @> ");
                 }
@@ -1051,10 +1184,12 @@ impl<'a> QueryFilter<'a> {
         } else if column.use_prefix_comparison {
             PrefixComparison::new(op, column, value)?.walk_ast(out.reborrow())?;
         } else if column.is_fulltext() {
+            out.push_sql(&self.table_prefix);
             out.push_identifier(column.name.as_str())?;
             out.push_sql(Comparison::Match.as_str());
             QueryValue(value, &column.column_type).walk_ast(out)?;
         } else {
+            out.push_sql(&self.table_prefix);
             out.push_identifier(column.name.as_str())?;
             out.push_sql(op.as_str());
             QueryValue(value, &column.column_type).walk_ast(out)?;
@@ -1074,6 +1209,7 @@ impl<'a> QueryFilter<'a> {
         if column.use_prefix_comparison {
             PrefixComparison::new(op, column, value)?.walk_ast(out.reborrow())?;
         } else {
+            out.push_sql(&self.table_prefix);
             out.push_identifier(column.name.as_str())?;
             out.push_sql(op.as_str());
             match value {
@@ -1129,6 +1265,7 @@ impl<'a> QueryFilter<'a> {
         }
 
         if have_nulls {
+            out.push_sql(&self.table_prefix);
             out.push_identifier(column.name.as_str())?;
             if negated {
                 out.push_sql(" is not null");
@@ -1157,6 +1294,7 @@ impl<'a> QueryFilter<'a> {
                 // is happening here
                 PrefixType::new(column)?.push_column_prefix(&mut out)?;
             } else {
+                out.push_sql(&self.table_prefix);
                 out.push_identifier(column.name.as_str())?;
             }
             if negated {
@@ -1201,6 +1339,7 @@ impl<'a> QueryFilter<'a> {
     ) -> QueryResult<()> {
         let column = self.column(attribute);
 
+        out.push_sql(&self.table_prefix);
         out.push_identifier(column.name.as_str())?;
         out.push_sql(op);
         match value {
@@ -1279,6 +1418,9 @@ impl<'a> QueryFragment<Pg> for QueryFilter<'a> {
                 self.starts_or_ends_with(attr, value, " not ilike ", false, out)?
             }
             ChangeBlockGte(block_number) => self.filter_block_gte(block_number, out)?,
+            Child(attr, entity_type, child_filter) => {
+                self.child(attr, entity_type, child_filter, out)?
+            }
         }
         Ok(())
     }
@@ -1784,7 +1926,7 @@ impl<'a> ParentLimit<'a> {
     fn restrict(&self, out: &mut AstPass<Pg>) -> QueryResult<()> {
         if let ParentLimit::Ranked(sort_key, range) = self {
             out.push_sql(" ");
-            sort_key.order_by(out)?;
+            sort_key.order_by(out, None)?;
             range.walk_ast(out.reborrow())?;
         }
         Ok(())
@@ -1829,7 +1971,7 @@ impl<'a> FilterWindow<'a> {
     fn new(
         layout: &'a Layout,
         window: EntityWindow,
-        query_filter: Option<&'a EntityFilter>,
+        entity_filter: Option<&'a EntityFilter>,
     ) -> Result<Self, QueryExecutionError> {
         let EntityWindow {
             child_type,
@@ -1846,8 +1988,8 @@ impl<'a> FilterWindow<'a> {
             }
         }
 
-        let query_filter = query_filter
-            .map(|filter| QueryFilter::new(filter, table))
+        let query_filter = entity_filter
+            .map(|filter| QueryFilter::new(&filter, table, layout))
             .transpose()?;
         let link = TableLink::new(layout, table, link)?;
         Ok(FilterWindow {
@@ -2278,7 +2420,7 @@ impl<'a> FilterCollection<'a> {
                             .map(|rc| rc.as_ref())
                             .and_then(|table| {
                                 filter
-                                    .map(|filter| QueryFilter::new(filter, table))
+                                    .map(|filter| QueryFilter::new(filter, table, layout))
                                     .transpose()
                                     .map(|filter| (table, filter, column_names.clone()))
                             })
@@ -2491,24 +2633,30 @@ impl<'a> SortKey<'a> {
 
     /// Generate
     ///   order by [name direction], id
-    fn order_by(&self, out: &mut AstPass<Pg>) -> QueryResult<()> {
+    fn order_by(&self, out: &mut AstPass<Pg>, prefix: Option<&str>) -> QueryResult<()> {
+        let prefix = prefix.unwrap_or("");
+
         match self {
             SortKey::None => Ok(()),
             SortKey::IdAsc(br_column) => {
                 out.push_sql("order by ");
+                out.push_sql(prefix);
                 out.push_identifier(PRIMARY_KEY_COLUMN)?;
                 if let Some(br_column) = br_column {
                     out.push_sql(", ");
+                    out.push_sql(prefix);
                     br_column.bare_name(out);
                 }
                 Ok(())
             }
             SortKey::IdDesc(br_column) => {
                 out.push_sql("order by ");
+                out.push_sql(prefix);
                 out.push_identifier(PRIMARY_KEY_COLUMN)?;
                 out.push_sql(" desc");
                 if let Some(br_column) = br_column {
                     out.push_sql(", ");
+                    out.push_sql(prefix);
                     br_column.bare_name(out);
                     out.push_sql(" desc");
                 }
@@ -2702,6 +2850,11 @@ impl<'a> FilterQuery<'a> {
         out.push_sql("\n  from ");
         out.push_sql(table.qualified_name.as_str());
         out.push_sql(" c");
+
+        if let Some(filter) = table_filter {
+            filter.walk_joins_ast(self.block, out.reborrow())?;
+        }
+
         out.push_sql("\n where ");
         BlockRangeColumn::new(&table, "c.", self.block).contains(&mut out)?;
         if let Some(filter) = table_filter {
@@ -2742,7 +2895,8 @@ impl<'a> FilterQuery<'a> {
         write_column_names(column_names, table, &mut out)?;
         self.filtered_rows(table, filter, out.reborrow())?;
         out.push_sql("\n ");
-        self.sort_key.order_by(&mut out)?;
+        out.push_sql(" GROUP BY c.id, c.vid "); // TODO: ask if it's fine to group by id and vid, always
+        self.sort_key.order_by(&mut out, Some("c."))?;
         self.range.walk_ast(out.reborrow())?;
         out.push_sql(") c");
         Ok(())
@@ -2821,7 +2975,8 @@ impl<'a> FilterQuery<'a> {
             self.filtered_rows(table, filter, out.reborrow())?;
         }
         out.push_sql("\n ");
-        self.sort_key.order_by(&mut out)?;
+        out.push_sql(" GROUP BY c.id, c.vid "); // TODO: ask if it's fine to group by id and vid, always
+        self.sort_key.order_by(&mut out, None)?;
         self.range.walk_ast(out.reborrow())?;
 
         out.push_sql(")\n");
@@ -2843,7 +2998,7 @@ impl<'a> FilterQuery<'a> {
             out.push_bind_param::<Text, _>(&table.object.as_str())?;
         }
         out.push_sql("\n ");
-        self.sort_key.order_by(&mut out)?;
+        self.sort_key.order_by(&mut out, None)?;
         Ok(())
     }
 
@@ -2894,7 +3049,7 @@ impl<'a> FilterQuery<'a> {
             window.children_uniform(&self.sort_key, self.block, out.reborrow())?;
         }
         out.push_sql("\n");
-        self.sort_key.order_by(&mut out)?;
+        self.sort_key.order_by(&mut out, None)?;
         self.range.walk_ast(out.reborrow())?;
         out.push_sql(") c)\n");
 
@@ -3366,7 +3521,7 @@ fn write_column_names(
     out: &mut AstPass<Pg>,
 ) -> QueryResult<()> {
     match column_names {
-        AttributeNames::All => out.push_sql(" * "),
+        AttributeNames::All => out.push_sql(" c.* "),
         AttributeNames::Select(column_names) => {
             let mut iterator = iter_column_names(column_names, table, true).peekable();
             while let Some(column_name) = iterator.next() {
