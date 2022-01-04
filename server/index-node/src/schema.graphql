@@ -43,6 +43,7 @@ type Query {
     network: String!
     blockHash: Bytes!
   ): [CachedEthereumCall!]
+  subgraphVersions(subgraphId: String!): [SubgraphVersion!]!
 }
 
 type SubgraphIndexingStatus {
@@ -172,4 +173,11 @@ type ProofOfIndexingResult {
   block: Block!
   "There may not be a proof of indexing available for the deployment and block"
   proofOfIndexing: Bytes
+}
+
+type SubgraphVersion {
+  """
+  Version number in SemVer format
+  """
+  version: String!
 }

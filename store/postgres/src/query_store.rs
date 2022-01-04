@@ -101,8 +101,8 @@ impl QueryStoreTrait for QueryStore {
             .await?)
     }
 
-    fn api_schema(&self) -> Result<Arc<ApiSchema>, QueryExecutionError> {
-        let info = self.store.subgraph_info(&self.site)?;
+    fn api_schema(&self, version: &Version) -> Result<Arc<ApiSchema>, QueryExecutionError> {
+        let info = self.store.subgraph_info(&self.site, version)?;
         Ok(info.api)
     }
 
