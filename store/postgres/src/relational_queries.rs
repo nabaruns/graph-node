@@ -990,12 +990,16 @@ impl<'a> QueryFilter<'a> {
                     Self::valid_attributes(filter, table, layout, child_filter_ancestor)?;
                 }
             }
-            Child(_, entity, child_filter) => {
+            Child(attr, entity, child_filter) => {
                 if child_filter_ancestor {
                     return Err(StoreError::QueryExecutionError(
                         "Only a single level sub filter is allowed".to_string(),
                     ));
                 }
+             
+                // Make sure that the attribute name is valid for the given table
+                table.column_for_field(attr)?;
+                
                 Self::valid_attributes(
                     child_filter,
                     layout.table_for_entity(entity)?,
