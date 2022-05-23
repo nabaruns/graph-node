@@ -237,7 +237,7 @@ impl fmt::Display for EntityFilter {
             NotEndsWith(a, v) => write!(f, "{a} !~ *{v}$"),
             NotEndsWithNoCase(a, v) => write!(f, "{a} !~ *{v}$i"),
             ChangeBlockGte(b) => write!(f, "block >= {b}"),
-            Child(a, et, cf) => write!(f, "join {et} by {a} ({})", cf.to_string()),
+            Child(a, et, cf) => write!(f, "join on {a} with {et}({})", cf.to_string()),
         }
     }
 }
