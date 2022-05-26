@@ -876,6 +876,7 @@ pub struct QueryFilter<'a> {
     layout: &'a Layout,
     table: &'a Table,
     table_prefix: &'a str,
+    block: BlockNumber,
 }
 
 /// String representation that is useful for debugging when `walk_ast` fails
@@ -890,6 +891,7 @@ impl<'a> QueryFilter<'a> {
         filter: &'a EntityFilter,
         table: &'a Table,
         layout: &'a Layout,
+        block: BlockNumber,
     ) -> Result<Self, StoreError> {
         Self::valid_attributes(filter, table, layout, false)?;
 
@@ -897,6 +899,7 @@ impl<'a> QueryFilter<'a> {
             filter,
             table,
             layout,
+            block,
             table_prefix: "c.",
         })
     }
@@ -965,6 +968,7 @@ impl<'a> QueryFilter<'a> {
             filter,
             table: self.table,
             layout: self.layout,
+            block: self.block,
             table_prefix: self.table_prefix.clone(),
         }
     }
@@ -1007,20 +1011,20 @@ impl<'a> QueryFilter<'a> {
 
         out.push_sql(" and ");
 
-        // TODO: we need a $block here
-        // // Match by block
-        // out.push_sql(inner_prefix);
-        // out.push_identifier(BLOCK_RANGE_COLUMN)?;
-        // out.push_sql(" @> ");
-        // out.push_bind_param::<Integer, _>(&block_number)?;
+        // Match by block
+        out.push_sql(inner_prefix);
+        out.push_identifier(BLOCK_RANGE_COLUMN)?;
+        out.push_sql(" @> ");
+        out.push_bind_param::<Integer, _>(&self.block)?;
 
-        // out.push_sql(" and ");
+        out.push_sql(" and ");
 
         // Inner filters
         let query_filter = QueryFilter {
             filter,
             table: inner_table,
             layout: self.layout,
+            block: self.block,
             table_prefix: inner_prefix,
         };
 
@@ -1939,6 +1943,7 @@ impl<'a> FilterWindow<'a> {
         layout: &'a Layout,
         window: EntityWindow,
         entity_filter: Option<&'a EntityFilter>,
+        block: BlockNumber,
     ) -> Result<Self, QueryExecutionError> {
         let EntityWindow {
             child_type,
@@ -1956,7 +1961,7 @@ impl<'a> FilterWindow<'a> {
         }
 
         let query_filter = entity_filter
-            .map(|filter| QueryFilter::new(&filter, table, layout))
+            .map(|filter| QueryFilter::new(&filter, table, layout, block))
             .transpose()?;
         let link = TableLink::new(layout, table, link)?;
         Ok(FilterWindow {
@@ -2372,6 +2377,7 @@ impl<'a> FilterCollection<'a> {
         layout: &'a Layout,
         collection: EntityCollection,
         filter: Option<&'a EntityFilter>,
+        block: BlockNumber,
     ) -> Result<Self, QueryExecutionError> {
         match collection {
             EntityCollection::All(entities) => {
@@ -2387,7 +2393,7 @@ impl<'a> FilterCollection<'a> {
                             .map(|rc| rc.as_ref())
                             .and_then(|table| {
                                 filter
-                                    .map(|filter| QueryFilter::new(filter, table, layout))
+                                    .map(|filter| QueryFilter::new(filter, table, layout, block))
                                     .transpose()
                                     .map(|filter| (table, filter, column_names.clone()))
                             })
@@ -2398,7 +2404,7 @@ impl<'a> FilterCollection<'a> {
             EntityCollection::Window(windows) => {
                 let windows = windows
                     .into_iter()
-                    .map(|window| FilterWindow::new(layout, window, filter))
+                    .map(|window| FilterWindow::new(layout, window, filter, block))
                     .collect::<Result<Vec<_>, _>>()?;
                 let collection = if windows.len() == 1 {
                     let mut windows = windows;
