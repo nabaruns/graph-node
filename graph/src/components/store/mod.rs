@@ -206,7 +206,12 @@ pub enum EntityFilter {
     NotEndsWith(Attribute, Value),
     NotEndsWithNoCase(Attribute, Value),
     ChangeBlockGte(BlockNumber),
-    Child(Attribute, EntityType, Box<EntityFilter>, EntityFilterDerivative),
+    Child(
+        Attribute,
+        EntityType,
+        Box<EntityFilter>,
+        EntityFilterDerivative,
+    ),
 }
 
 // A somewhat concise string representation of a filter

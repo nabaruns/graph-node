@@ -15,8 +15,8 @@ use diesel::Connection;
 use graph::data::value::Word;
 use graph::prelude::{
     anyhow, r, serde_json, Attribute, BlockNumber, ChildMultiplicity, Entity, EntityCollection,
-    EntityFilter, EntityKey, EntityLink, EntityOrder, EntityRange, EntityWindow, ParentLink,
-    QueryExecutionError, StoreError, Value, ENV_VARS, EntityFilterDerivative,
+    EntityFilter, EntityFilterDerivative, EntityKey, EntityLink, EntityOrder, EntityRange,
+    EntityWindow, ParentLink, QueryExecutionError, StoreError, Value, ENV_VARS,
 };
 use graph::{
     components::store::{AttributeNames, EntityType},
