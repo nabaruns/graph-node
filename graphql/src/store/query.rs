@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::mem::discriminant;
 
+use graph::data::graphql::ext::DirectiveFinder;
 use graph::data::value::Object;
 use graph::data::value::Value as DataValue;
 use graph::prelude::s::Type;
@@ -274,6 +275,7 @@ fn build_child_filter_from_object(
         field_name,
         EntityType::new(type_name.to_string()),
         Box::new(filter),
+        EntityFilterDerivative::new(field.is_derived()),
     ))
 }
 

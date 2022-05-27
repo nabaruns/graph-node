@@ -357,11 +357,7 @@ fn field_list_filter_input_values(
         // derived, we allow ID strings to be passed on.
         let (input_field_type, parent_type_name) = match typedef {
             TypeDefinition::Object(parent) => {
-                if ast::get_derived_from_directive(field).is_some() {
-                    return None;
-                } else {
-                    (Type::NamedType("String".into()), Some(parent.name.clone()))
-                }
+                (Type::NamedType("String".into()), Some(parent.name.clone()))
             }
             TypeDefinition::Interface(parent) => {
                 if ast::get_derived_from_directive(field).is_some() {

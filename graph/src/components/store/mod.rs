@@ -82,6 +82,19 @@ impl From<&str> for EntityType {
 
 impl CheapClone for EntityType {}
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EntityFilterDerivative(bool);
+
+impl EntityFilterDerivative {
+    pub fn new(derived: bool) -> Self {
+        Self(derived)
+    }
+
+    pub fn is_derived(&self) -> bool {
+        self.0
+    }
+}
+
 // Note: Do not modify fields without making a backward compatible change to
 // the StableHash impl (below)
 /// Key by which an individual entity in the store can be accessed.
@@ -193,7 +206,7 @@ pub enum EntityFilter {
     NotEndsWith(Attribute, Value),
     NotEndsWithNoCase(Attribute, Value),
     ChangeBlockGte(BlockNumber),
-    Child(String, EntityType, Box<EntityFilter>),
+    Child(Attribute, EntityType, Box<EntityFilter>, EntityFilterDerivative),
 }
 
 // A somewhat concise string representation of a filter
@@ -237,7 +250,7 @@ impl fmt::Display for EntityFilter {
             NotEndsWith(a, v) => write!(f, "{a} !~ *{v}$"),
             NotEndsWithNoCase(a, v) => write!(f, "{a} !~ *{v}$i"),
             ChangeBlockGte(b) => write!(f, "block >= {b}"),
-            Child(a, et, cf) => write!(f, "join on {a} with {et}({})", cf.to_string()),
+            Child(a, et, cf, _) => write!(f, "join on {a} with {et}({})", cf.to_string()),
         }
     }
 }

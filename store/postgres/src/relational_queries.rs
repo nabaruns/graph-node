@@ -16,7 +16,7 @@ use graph::data::value::Word;
 use graph::prelude::{
     anyhow, r, serde_json, Attribute, BlockNumber, ChildMultiplicity, Entity, EntityCollection,
     EntityFilter, EntityKey, EntityLink, EntityOrder, EntityRange, EntityWindow, ParentLink,
-    QueryExecutionError, StoreError, Value, ENV_VARS,
+    QueryExecutionError, StoreError, Value, ENV_VARS, EntityFilterDerivative,
 };
 use graph::{
     components::store::{AttributeNames, EntityType},
@@ -917,7 +917,7 @@ impl<'a> QueryFilter<'a> {
                     Self::valid_attributes(filter, table, layout, child_filter_ancestor)?;
                 }
             }
-            Child(attr, entity, child_filter) => {
+            Child(attr, entity, child_filter, _) => {
                 if child_filter_ancestor {
                     return Err(StoreError::QueryExecutionError(
                         "Only a single level sub filter is allowed".to_string(),
@@ -978,19 +978,20 @@ impl<'a> QueryFilter<'a> {
         attribute: &Attribute,
         entity_type: &'a EntityType,
         filter: &'a EntityFilter,
+        derivative: &'a EntityFilterDerivative,
         mut out: AstPass<Pg>,
     ) -> QueryResult<()> {
-        let inner_table = self
+        let child_table = self
             .layout
             .table_for_entity(entity_type)
             .expect("Table for child entity not found");
 
-        let inner_prefix = "inner.";
+        let child_prefix = "inner.";
 
         out.push_sql("exists (select 1");
 
         out.push_sql(" from ");
-        out.push_sql(inner_table.qualified_name.as_str());
+        out.push_sql(child_table.qualified_name.as_str());
         out.push_sql(" inner");
 
         out.push_sql(" where ");
@@ -1001,48 +1002,62 @@ impl<'a> QueryFilter<'a> {
             .column_for_field(attribute)
             .expect("Column for an attribute not found");
         let parent_prefix = "c.";
-        let inner_column = inner_table.primary_key();
+        let child_column = child_table.primary_key();
 
-        // Join parent and inner table
-        // Parent is not derived
-        // Parent is a list
-        if parent_column.is_list() {
-            // Child is not a list, it can't be
+        // Join parent and child table
+        let outer_prefix: &str;
+        let outer_column: &Column;
+        let inner_prefix: &str;
+        let inner_column: &Column;
+
+        if derivative.is_derived() {
+            outer_prefix = parent_prefix;
+            outer_column = parent_column;
+            inner_prefix = child_prefix;
+            inner_column = child_column;
+        } else {
+            // If parent is derived from child, then we need to swap the join order
+            outer_prefix = child_prefix;
+            outer_column = child_column;
+            inner_prefix = parent_prefix;
+            inner_column = parent_column;
+        }
+
+        if outer_column.is_list() {
             // child.id = any(parent.children)
             out.push_sql(inner_prefix);
             out.push_sql(inner_column.name.as_str());
             out.push_sql(" = ");
             out.push_sql("any(");
-            out.push_sql(parent_prefix);
-            out.push_sql(parent_column.name.as_str());
+            out.push_sql(outer_prefix);
+            out.push_sql(outer_column.name.as_str());
             out.push_sql(")");
         } else {
             // child.id = parent.child
             out.push_sql(inner_prefix);
             out.push_sql(inner_column.name.as_str());
             out.push_sql(" = ");
-            out.push_sql(parent_prefix);
-            out.push_sql(parent_column.name.as_str());
+            out.push_sql(outer_prefix);
+            out.push_sql(outer_column.name.as_str());
         }
-        // TODO: Parent is derived
 
         out.push_sql(" and ");
 
         // Match by block
-        out.push_sql(inner_prefix);
+        out.push_sql(child_prefix);
         out.push_identifier(BLOCK_RANGE_COLUMN)?;
         out.push_sql(" @> ");
         out.push_bind_param::<Integer, _>(&self.block)?;
 
         out.push_sql(" and ");
 
-        // Inner filters
+        // Child filters
         let query_filter = QueryFilter {
             filter,
-            table: inner_table,
+            table: child_table,
             layout: self.layout,
             block: self.block,
-            table_prefix: inner_prefix,
+            table_prefix: child_prefix,
         };
 
         query_filter.walk_ast(out.reborrow())?;
@@ -1406,8 +1421,8 @@ impl<'a> QueryFragment<Pg> for QueryFilter<'a> {
                 self.starts_or_ends_with(attr, value, " not ilike ", false, out)?
             }
             ChangeBlockGte(block_number) => self.filter_block_gte(block_number, out)?,
-            Child(attr, entity_type, child_filter) => {
-                self.child(attr, entity_type, child_filter, out)?
+            Child(attr, entity_type, child_filter, derivative) => {
+                self.child(attr, entity_type, child_filter, derivative, out)?
             }
         }
         Ok(())
