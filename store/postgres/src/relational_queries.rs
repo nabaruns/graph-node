@@ -1003,11 +1003,28 @@ impl<'a> QueryFilter<'a> {
         let parent_prefix = "c.";
         let inner_column = inner_table.primary_key();
 
-        out.push_sql(inner_prefix);
-        out.push_sql(inner_column.name.as_str());
-        out.push_sql(" = ");
-        out.push_sql(parent_prefix);
-        out.push_sql(parent_column.name.as_str());
+        // Join parent and inner table
+        // Parent is not derived
+        // Parent is a list
+        if parent_column.is_list() {
+            // Child is not a list, it can't be
+            // child.id = any(parent.children)
+            out.push_sql(inner_prefix);
+            out.push_sql(inner_column.name.as_str());
+            out.push_sql(" = ");
+            out.push_sql("any(");
+            out.push_sql(parent_prefix);
+            out.push_sql(parent_column.name.as_str());
+            out.push_sql(")");
+        } else {
+            // child.id = parent.child
+            out.push_sql(inner_prefix);
+            out.push_sql(inner_column.name.as_str());
+            out.push_sql(" = ");
+            out.push_sql(parent_prefix);
+            out.push_sql(parent_column.name.as_str());
+        }
+        // TODO: Parent is derived
 
         out.push_sql(" and ");
 
