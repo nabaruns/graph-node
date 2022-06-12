@@ -962,6 +962,7 @@ impl DeploymentStore {
         stopwatch: &StopwatchMetrics,
         data_sources: &[StoredDynamicDataSource],
         deterministic_errors: &[SubgraphError],
+        manifest_idx_and_name: &[(u32, String)],
     ) -> Result<StoreEvent, StoreError> {
         // All operations should apply only to data or metadata for this subgraph
         if mods
@@ -999,7 +1000,13 @@ impl DeploymentStore {
             )?;
             section.end();
 
-            dynds::insert(&conn, &site, data_sources, block_ptr_to)?;
+            dynds::insert(
+                &conn,
+                &site,
+                data_sources,
+                block_ptr_to,
+                manifest_idx_and_name,
+            )?;
 
             if !deterministic_errors.is_empty() {
                 deployment::insert_subgraph_errors(
@@ -1176,9 +1183,10 @@ impl DeploymentStore {
         &self,
         site: Arc<Site>,
         block: BlockNumber,
+        manifest_idx_and_name: Vec<(u32, String)>,
     ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         self.with_conn(move |conn, _| {
-            conn.transaction(|| crate::dynds::load(&conn, &site, block))
+            conn.transaction(|| crate::dynds::load(&conn, &site, block, manifest_idx_and_name))
                 .map_err(Into::into)
         })
         .await

@@ -254,6 +254,7 @@ impl SyncStore {
         stopwatch: &StopwatchMetrics,
         data_sources: &[StoredDynamicDataSource],
         deterministic_errors: &[SubgraphError],
+        manifest_idx_and_name: &[(u32, String)],
     ) -> Result<(), StoreError> {
         fn same_subgraph(mods: &[EntityModification], id: &DeploymentHash) -> bool {
             mods.iter().all(|md| &md.entity_key().subgraph_id == id)
@@ -272,6 +273,7 @@ impl SyncStore {
                 stopwatch,
                 data_sources,
                 deterministic_errors,
+                manifest_idx_and_name,
             )?;
 
             let _section = stopwatch.start_section("send_store_event");
@@ -313,10 +315,15 @@ impl SyncStore {
     async fn load_dynamic_data_sources(
         &self,
         block: BlockNumber,
+        manifest_idx_and_name: Vec<(u32, String)>,
     ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         self.retry_async("load_dynamic_data_sources", || async {
             self.writable
-                .load_dynamic_data_sources(self.site.cheap_clone(), block)
+                .load_dynamic_data_sources(
+                    self.site.cheap_clone(),
+                    block,
+                    manifest_idx_and_name.clone(),
+                )
                 .await
         })
         .await
@@ -422,6 +429,7 @@ enum Request {
         mods: Vec<EntityModification>,
         data_sources: Vec<StoredDynamicDataSource>,
         deterministic_errors: Vec<SubgraphError>,
+        manifest_idx_and_name: Vec<(u32, String)>,
     },
     RevertTo {
         store: Arc<SyncStore>,
@@ -442,6 +450,7 @@ impl Request {
                 mods,
                 data_sources,
                 deterministic_errors,
+                manifest_idx_and_name,
             } => store.transact_block_operations(
                 block_ptr_to,
                 firehose_cursor.as_deref(),
@@ -449,6 +458,7 @@ impl Request {
                 stopwatch,
                 data_sources,
                 deterministic_errors,
+                manifest_idx_and_name,
             ),
             Request::RevertTo {
                 store,
@@ -736,7 +746,10 @@ impl Queue {
     }
 
     /// Load dynamic data sources by looking at both the queue and the store
-    async fn load_dynamic_data_sources(&self) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
+    async fn load_dynamic_data_sources(
+        &self,
+        manifest_idx_and_name: Vec<(u32, String)>,
+    ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         // See the implementation of `get` for how we handle reverts
         let mut tracker = BlockTracker::new();
 
@@ -770,7 +783,7 @@ impl Queue {
 
         let mut dds = self
             .store
-            .load_dynamic_data_sources(tracker.query_block())
+            .load_dynamic_data_sources(tracker.query_block(), manifest_idx_and_name)
             .await?;
         dds.append(&mut queue_dds);
 
@@ -807,6 +820,7 @@ impl Writer {
         stopwatch: &StopwatchMetrics,
         data_sources: Vec<StoredDynamicDataSource>,
         deterministic_errors: Vec<SubgraphError>,
+        manifest_idx_and_name: Vec<(u32, String)>,
     ) -> Result<(), StoreError> {
         match self {
             Writer::Sync(store) => store.transact_block_operations(
@@ -816,6 +830,7 @@ impl Writer {
                 &stopwatch,
                 &data_sources,
                 &deterministic_errors,
+                &manifest_idx_and_name,
             ),
             Writer::Async(queue) => {
                 let req = Request::Write {
@@ -826,6 +841,7 @@ impl Writer {
                     mods,
                     data_sources,
                     deterministic_errors,
+                    manifest_idx_and_name,
                 };
                 queue.push(req).await
             }
@@ -875,10 +891,17 @@ impl Writer {
         }
     }
 
-    async fn load_dynamic_data_sources(&self) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
+    async fn load_dynamic_data_sources(
+        &self,
+        manifest_idx_and_name: Vec<(u32, String)>,
+    ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
         match self {
-            Writer::Sync(store) => store.load_dynamic_data_sources(BLOCK_NUMBER_MAX).await,
-            Writer::Async(queue) => queue.load_dynamic_data_sources().await,
+            Writer::Sync(store) => {
+                store
+                    .load_dynamic_data_sources(BLOCK_NUMBER_MAX, manifest_idx_and_name)
+                    .await
+            }
+            Writer::Async(queue) => queue.load_dynamic_data_sources(manifest_idx_and_name).await,
         }
     }
 }
@@ -1003,6 +1026,7 @@ impl WritableStoreTrait for WritableStore {
         stopwatch: &StopwatchMetrics,
         data_sources: Vec<StoredDynamicDataSource>,
         deterministic_errors: Vec<SubgraphError>,
+        manifest_idx_and_name: Vec<(u32, String)>,
     ) -> Result<(), StoreError> {
         self.writer
             .write(
@@ -1012,6 +1036,7 @@ impl WritableStoreTrait for WritableStore {
                 stopwatch,
                 data_sources,
                 deterministic_errors,
+                manifest_idx_and_name,
             )
             .await?;
 
@@ -1040,8 +1065,13 @@ impl WritableStoreTrait for WritableStore {
         self.store.unassign_subgraph()
     }
 
-    async fn load_dynamic_data_sources(&self) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
-        self.writer.load_dynamic_data_sources().await
+    async fn load_dynamic_data_sources(
+        &self,
+        manifest_idx_and_name: Vec<(u32, String)>,
+    ) -> Result<Vec<StoredDynamicDataSource>, StoreError> {
+        self.writer
+            .load_dynamic_data_sources(manifest_idx_and_name)
+            .await
     }
 
     fn shard(&self) -> &str {
