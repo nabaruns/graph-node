@@ -7,9 +7,13 @@ use graph::log;
 use graph::prelude::{QueryStoreManager as _, SubgraphStore as _, *};
 use graph::semver::Version;
 use graph::{
-    blockchain::ChainIdentifier, components::store::DeploymentLocator,
-    components::store::EntityType, components::store::StatusStore,
-    components::store::StoredDynamicDataSource, data::subgraph::status, prelude::NodeId,
+    blockchain::ChainIdentifier,
+    components::store::DeploymentLocator,
+    components::store::EntityType,
+    components::store::StatusStore,
+    components::store::StoredDynamicDataSource,
+    data::subgraph::{status, SubgraphFeature},
+    prelude::NodeId,
 };
 use graph_graphql::prelude::{
     execute_query, Query as PreparedQuery, QueryExecutionOptions, StoreResolver,
@@ -150,13 +154,14 @@ pub async fn create_subgraph(
     subgraph_id: &DeploymentHash,
     schema: &str,
     base: Option<(DeploymentHash, BlockPtr)>,
+    features: Option<BTreeSet<SubgraphFeature>>,
 ) -> Result<DeploymentLocator, StoreError> {
     let schema = Schema::parse(schema, subgraph_id.clone()).unwrap();
 
     let manifest = SubgraphManifest::<graph_chain_ethereum::Chain> {
         id: subgraph_id.clone(),
         spec_version: Version::new(1, 0, 0),
-        features: BTreeSet::new(),
+        features: features.unwrap_or_default(),
         description: Some(format!("manifest for {}", subgraph_id)),
         repository: Some(format!("repo for {}", subgraph_id)),
         schema: schema.clone(),
@@ -191,7 +196,9 @@ pub async fn create_subgraph(
 }
 
 pub async fn create_test_subgraph(subgraph_id: &DeploymentHash, schema: &str) -> DeploymentLocator {
-    create_subgraph(subgraph_id, schema, None).await.unwrap()
+    create_subgraph(subgraph_id, schema, None, None)
+        .await
+        .unwrap()
 }
 
 pub fn remove_subgraph(id: &DeploymentHash) {

@@ -3,8 +3,8 @@ use graph::{
         server::index_node::VersionInfo,
         store::{DeploymentLocator, StatusStore},
     },
-    data::subgraph::schema::SubgraphHealth,
     data::subgraph::schema::{DeploymentCreate, SubgraphError},
+    data::subgraph::{schema::SubgraphHealth, SubgraphFeature},
     prelude::EntityChange,
     prelude::EntityChangeOperation,
     prelude::QueryStoreManager,
@@ -20,7 +20,11 @@ use graph::{
 use graph_store_postgres::layout_for_tests::Connection as Primary;
 use graph_store_postgres::SubgraphStore;
 
-use std::{collections::HashSet, marker::PhantomData, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    marker::PhantomData,
+    sync::Arc,
+};
 use test_store::*;
 
 const SUBGRAPH_GQL: &str = "
@@ -49,6 +53,17 @@ fn get_version_info(store: &Store, subgraph_name: &str) -> VersionInfo {
     let (current, _) = primary.versions_for_subgraph(subgraph_name).unwrap();
     let current = current.unwrap();
     store.version_info(&current).unwrap()
+}
+
+async fn create_subgraph_with_non_fatal_feature(
+    subgraph_id: &DeploymentHash,
+    schema: &str,
+) -> DeploymentLocator {
+    let mut features = BTreeSet::new();
+    features.insert(SubgraphFeature::NonFatalErrors);
+    test_store::create_subgraph(subgraph_id, schema, None, Some(features))
+        .await
+        .unwrap()
 }
 
 #[test]
@@ -533,7 +548,7 @@ fn fatal_vs_non_fatal() {
     async fn setup() -> DeploymentLocator {
         let id = DeploymentHash::new("failUnfail").unwrap();
         remove_subgraphs();
-        create_test_subgraph(&id, SUBGRAPH_GQL).await
+        create_subgraph_with_non_fatal_feature(&id, SUBGRAPH_GQL).await
     }
 
     run_test_sequentially(|store| async move {
@@ -571,13 +586,59 @@ fn fatal_vs_non_fatal() {
 }
 
 #[test]
+fn has_non_fatal_errors_without_feature() {
+    async fn setup() -> DeploymentLocator {
+        let id = DeploymentHash::new("failUnfail").unwrap();
+        remove_subgraphs();
+        // Doesn't have any subgraph features.
+        create_test_subgraph(&id, SUBGRAPH_GQL).await
+    }
+
+    run_test_sequentially(|store| async move {
+        let deployment = setup().await;
+        let query_store = store
+            .query_store(deployment.hash.clone().into(), false)
+            .await
+            .unwrap();
+
+        let error = || SubgraphError {
+            subgraph_id: deployment.hash.clone(),
+            message: "test".to_string(),
+            block_ptr: Some(BLOCKS[1].clone()),
+            handler: None,
+            deterministic: true,
+        };
+
+        store
+            .subgraph_store()
+            .writable(LOGGER.clone(), deployment.id)
+            .await
+            .expect("can get writable")
+            .fail_subgraph(error())
+            .await
+            .unwrap();
+
+        // Returns false because there are no errors.
+        assert!(!query_store.has_non_fatal_errors(None).await.unwrap());
+
+        transact_errors(&store, &deployment, BLOCKS[1].clone(), vec![error()])
+            .await
+            .unwrap();
+
+        // Still returns false because the subgraph doesn't have
+        // the NonFatalErrors feature.
+        assert!(!query_store.has_non_fatal_errors(None).await.unwrap());
+    })
+}
+
+#[test]
 fn fail_unfail_deterministic_error() {
     const NAME: &str = "failUnfailDeterministic";
 
     async fn setup() -> DeploymentLocator {
         let id = DeploymentHash::new(NAME).unwrap();
         remove_subgraphs();
-        create_test_subgraph(&id, SUBGRAPH_GQL).await
+        create_subgraph_with_non_fatal_feature(&id, SUBGRAPH_GQL).await
     }
 
     run_test_sequentially(|store| async move {

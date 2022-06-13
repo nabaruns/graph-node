@@ -86,10 +86,13 @@ impl QueryStoreTrait for QueryStore {
     }
 
     async fn has_non_fatal_errors(&self, block: Option<BlockNumber>) -> Result<bool, StoreError> {
-        let id = self.site.deployment.clone();
+        let site = self.site.clone();
+        let id = site.deployment.clone();
+
         self.store
             .with_conn(move |conn, _| {
-                crate::deployment::has_deterministic_errors(conn, &id, block).map_err(|e| e.into())
+                crate::deployment::has_non_fatal_errors(conn, &site, &id, block)
+                    .map_err(|e| e.into())
             })
             .await
     }

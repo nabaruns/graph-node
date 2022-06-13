@@ -273,7 +273,7 @@ async fn create_grafted_subgraph(
     base_block: BlockPtr,
 ) -> Result<DeploymentLocator, StoreError> {
     let base = Some((DeploymentHash::new(base_id).unwrap(), base_block));
-    test_store::create_subgraph(subgraph_id, schema, base).await
+    test_store::create_subgraph(subgraph_id, schema, base, None).await
 }
 
 fn find_entities(

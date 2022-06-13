@@ -696,6 +696,24 @@ pub(crate) fn has_deterministic_errors(
     .map_err(|e| e.into())
 }
 
+/// Looks for deterministic errors if the subgraph has the non-fatal errors
+/// feature enabled.
+pub(crate) fn has_non_fatal_errors(
+    conn: &PgConnection,
+    site: &Site,
+    id: &DeploymentHash,
+    block: Option<BlockNumber>,
+) -> Result<bool, StoreError> {
+    let has_non_fatal_errors_feature =
+        features(conn, site)?.contains(&SubgraphFeature::NonFatalErrors);
+
+    if has_non_fatal_errors_feature {
+        has_deterministic_errors(conn, id, block)
+    } else {
+        Ok(false)
+    }
+}
+
 pub fn update_deployment_status(
     conn: &PgConnection,
     deployment_id: &DeploymentHash,
