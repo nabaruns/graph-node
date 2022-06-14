@@ -232,7 +232,9 @@ fn field_filter_input_values(
                     // Only add `where` filter fields for object and interface fields
                     // if they are not @derivedFrom
                     if ast::get_derived_from_directive(field).is_some() {
-                        vec![]
+                        let mut input_values = vec![];
+                        extend_with_child_filter_input_value(field, name, &mut input_values);
+                        input_values
                     } else {
                         // We allow filtering with `where: { other: "some-id" }` and
                         // `where: { others: ["some-id", "other-id"] }`. In both cases,
@@ -355,21 +357,44 @@ fn field_list_filter_input_values(
         // Decide what type of values can be passed to the filter. In the case
         // one-to-many or many-to-many object or interface fields that are not
         // derived, we allow ID strings to be passed on.
+        // Adds child filter for all objects and interfaces.
         let (input_field_type, parent_type_name) = match typedef {
             TypeDefinition::Object(parent) => {
-                (Type::NamedType("String".into()), Some(parent.name.clone()))
+                if ast::get_derived_from_directive(field).is_some() {
+                    (None, Some(parent.name.clone()))
+                } else {
+                    (
+                        Some(Type::NamedType("String".into())),
+                        Some(parent.name.clone()),
+                    )
+                }
             }
             TypeDefinition::Interface(parent) => {
                 if ast::get_derived_from_directive(field).is_some() {
-                    return None;
+                    (None, Some(parent.name.clone()))
                 } else {
-                    (Type::NamedType("String".into()), Some(parent.name.clone()))
+                    (
+                        Some(Type::NamedType("String".into())),
+                        Some(parent.name.clone()),
+                    )
                 }
             }
-            TypeDefinition::Scalar(ref t) => (Type::NamedType(t.name.to_owned()), None),
-            TypeDefinition::Enum(ref t) => (Type::NamedType(t.name.to_owned()), None),
-            TypeDefinition::InputObject(_) | TypeDefinition::Union(_) => return None,
+            TypeDefinition::Scalar(ref t) => (Some(Type::NamedType(t.name.to_owned())), None),
+            TypeDefinition::Enum(ref t) => (Some(Type::NamedType(t.name.to_owned())), None),
+            TypeDefinition::InputObject(_) | TypeDefinition::Union(_) => (None, None),
         };
+
+        if input_field_type.is_none() {
+            let mut input_values: Vec<InputValue> = vec![];
+
+            if let Some(parent) = parent_type_name {
+                extend_with_child_filter_input_value(field, &parent, &mut input_values);
+            }
+
+            return Some(input_values);
+        }
+
+        let input_field_type = input_field_type.unwrap();
 
         let mut input_values: Vec<InputValue> = vec![
             "",
@@ -887,14 +912,14 @@ mod tests {
             .get_named_type("User_filter")
             .expect("User_filter type is missing in derived API schema");
 
-        let filter_type = match user_filter {
+        let user_filter_type = match user_filter {
             TypeDefinition::InputObject(t) => Some(t),
             _ => None,
         }
         .expect("User_filter type is not an input object");
 
         assert_eq!(
-            filter_type
+            user_filter_type
                 .fields
                 .iter()
                 .map(|field| field.name.to_owned())
@@ -966,6 +991,8 @@ mod tests {
                 "favoritePet_not_ends_with",
                 "favoritePet_not_ends_with_nocase",
                 "favoritePet_",
+                "leastFavoritePet_",
+                "mostFavoritePets_",
                 "_change_block"
             ]
             .iter()
@@ -973,7 +1000,73 @@ mod tests {
             .collect::<Vec<String>>()
         );
 
-        let change_block_filter = filter_type
+        let pet_filter = schema
+            .get_named_type("Pet_filter")
+            .expect("Pet_filter type is missing in derived API schema");
+
+        let pet_filter_type = match pet_filter {
+            TypeDefinition::InputObject(t) => Some(t),
+            _ => None,
+        }
+        .expect("Pet_filter type is not an input object");
+
+        assert_eq!(
+            pet_filter_type
+                .fields
+                .iter()
+                .map(|field| field.name.to_owned())
+                .collect::<Vec<String>>(),
+            [
+                "id",
+                "id_not",
+                "id_gt",
+                "id_lt",
+                "id_gte",
+                "id_lte",
+                "id_in",
+                "id_not_in",
+                "name",
+                "name_not",
+                "name_gt",
+                "name_lt",
+                "name_gte",
+                "name_lte",
+                "name_in",
+                "name_not_in",
+                "name_contains",
+                "name_contains_nocase",
+                "name_not_contains",
+                "name_not_contains_nocase",
+                "name_starts_with",
+                "name_starts_with_nocase",
+                "name_not_starts_with",
+                "name_not_starts_with_nocase",
+                "name_ends_with",
+                "name_ends_with_nocase",
+                "name_not_ends_with",
+                "name_not_ends_with_nocase",
+                "mostHatedBy",
+                "mostHatedBy_not",
+                "mostHatedBy_contains",
+                "mostHatedBy_contains_nocase",
+                "mostHatedBy_not_contains",
+                "mostHatedBy_not_contains_nocase",
+                "mostHatedBy_",
+                "mostLovedBy",
+                "mostLovedBy_not",
+                "mostLovedBy_contains",
+                "mostLovedBy_contains_nocase",
+                "mostLovedBy_not_contains",
+                "mostLovedBy_not_contains_nocase",
+                "mostLovedBy_",
+                "_change_block"
+            ]
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+        );
+
+        let change_block_filter = user_filter_type
             .fields
             .iter()
             .find(move |p| match p.name.as_str() {
@@ -1195,57 +1288,5 @@ type Gravatar @entity {
             _ => None,
         }
         .expect("\"metadata\" field is missing on Query type");
-    }
-
-    #[test]
-    fn api_schema_contains_child_entity_filter_on_lists() {
-        let input_schema = parse_schema(
-            r#"
-                type Note @entity {
-                    id: ID!
-                    text: String!
-                    author: User! @derived(field: "id")
-                }
-              
-                type User @entity {
-                    id: ID!
-                    dateOfBirth: String
-                    country: String
-                    notes: [Note!]!
-                }
-            "#,
-        )
-        .expect("Failed to parse input schema");
-        let schema = api_schema(&input_schema).expect("Failed to derived API schema");
-
-        println!("{}", schema);
-
-        let user_filter = schema
-            .get_named_type("User_filter")
-            .expect("User_filter type is missing in derived API schema");
-
-        let filter_type = match user_filter {
-            TypeDefinition::InputObject(t) => Some(t),
-            _ => None,
-        }
-        .expect("User_filter type is not an input object");
-
-        let user_notes_filter_field = filter_type
-            .fields
-            .iter()
-            .find_map(|field| {
-                if field.name == "notes_" {
-                    Some(field)
-                } else {
-                    None
-                }
-            })
-            .expect("notes_ field is missing in the User_filter input object");
-
-        assert_eq!(user_notes_filter_field.name, "notes_");
-        assert_eq!(
-            user_notes_filter_field.value_type,
-            Type::NamedType(String::from("Note_filter"))
-        );
     }
 }
