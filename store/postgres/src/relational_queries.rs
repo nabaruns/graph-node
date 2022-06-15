@@ -978,8 +978,7 @@ impl<'a> QueryFilter<'a> {
         attribute: &Attribute,
         entity_type: &'a EntityType,
         filter: &'a EntityFilter,
-        // TODO: discuss the column swapping with David
-        _derivative: &'a EntityFilterDerivative,
+        derivative: &'a EntityFilterDerivative,
         mut out: AstPass<Pg>,
     ) -> QueryResult<()> {
         let child_table = self
@@ -988,6 +987,7 @@ impl<'a> QueryFilter<'a> {
             .expect("Table for child entity not found");
 
         let child_prefix = "i.";
+        let parent_prefix = "c.";
 
         out.push_sql("exists (select 1");
 
@@ -997,58 +997,58 @@ impl<'a> QueryFilter<'a> {
 
         out.push_sql(" where ");
 
-        // Join parent and inner table
-        let parent_column = self
-            .table
-            .column_for_field(attribute)
-            .expect("Column for an attribute not found");
-        let parent_prefix = "c.";
-        let child_column = child_table.primary_key();
+        // Join tables
+        if derivative.is_derived() {
+            // If the parent is derived,
+            // the child column is picked based on the provided attribute
+            // and the parent column is the primary key of the parent table
+            let child_column = child_table
+                .column_for_field(attribute)
+                .expect("Column for an attribute not found");
+            let parent_column = self.table.primary_key();
 
-        // Join parent and child table
-        let outer_prefix = parent_prefix;
-        let outer_column = parent_column;
-        let inner_prefix = child_prefix;
-        let inner_column = child_column;
-
-        //
-        // I thought we have to swap the join order when parent is derived from child, but it seems to work fine without swapping.
-        //
-        // let outer_prefix: &str;
-        // let outer_column: &Column;
-        // let inner_prefix: &str;
-        // let inner_column: &Column;
-        // if derivative.is_derived() {
-        //     println!("derivative.is_derived");
-        //     outer_prefix = parent_prefix;
-        //     outer_column = parent_column;
-        //     inner_prefix = child_prefix;
-        //     inner_column = child_column;
-        // } else {
-        //     println!("NOT derivative.is_derived");
-        //     // If parent is derived from child, then we need to swap the join order
-        //     outer_prefix = parent_prefix;
-        //     outer_column = parent_column;
-        //     inner_prefix = child_prefix;
-        //     inner_column = child_column;
-        // }
-
-        if outer_column.is_list() {
-            // child.id = any(parent.children)
-            out.push_sql(inner_prefix);
-            out.push_sql(inner_column.name.as_str());
-            out.push_sql(" = ");
-            out.push_sql("any(");
-            out.push_sql(outer_prefix);
-            out.push_sql(outer_column.name.as_str());
-            out.push_sql(")");
+            if child_column.is_list() {
+                // Type A: p.id = any(c.{parent_field})
+                out.push_sql(parent_prefix);
+                out.push_identifier(parent_column.name.as_str())?;
+                out.push_sql(" = any(");
+                out.push_sql(child_prefix);
+                out.push_identifier(child_column.name.as_str())?;
+                out.push_sql(")");
+            } else {
+                // Type B: p.id = c.{parent_field}
+                out.push_sql(parent_prefix);
+                out.push_identifier(parent_column.name.as_str())?;
+                out.push_sql(" = ");
+                out.push_sql(child_prefix);
+                out.push_identifier(child_column.name.as_str())?;
+            }
         } else {
-            // child.id = parent.child
-            out.push_sql(inner_prefix);
-            out.push_sql(inner_column.name.as_str());
-            out.push_sql(" = ");
-            out.push_sql(outer_prefix);
-            out.push_sql(outer_column.name.as_str());
+            // If the parent is not derived, we do the opposite.
+            // The parent column is picked based on the provided attribute
+            // and the child column is the primary key of the child table
+            let parent_column = self
+                .table
+                .column_for_field(attribute)
+                .expect("Column for an attribute not found");
+            let child_column = child_table.primary_key();
+
+            if parent_column.is_list() {
+                // Type C: c.id = any(p.child_ids)
+                out.push_sql(child_prefix);
+                out.push_identifier(child_column.name.as_str())?;
+                out.push_sql(" = any(");
+                out.push_sql(parent_prefix);
+                out.push_identifier(parent_column.name.as_str())?;
+                out.push_sql(")");
+            } else {
+                // Type D: c.id = p.child_id
+                out.push_sql(child_prefix);
+                out.push_identifier(child_column.name.as_str())?;
+                out.push_sql(" = ");
+                out.push_sql(parent_prefix);
+                out.push_identifier(parent_column.name.as_str())?;
+            }
         }
 
         out.push_sql(" and ");
