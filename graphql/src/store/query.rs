@@ -271,12 +271,30 @@ fn build_child_filter_from_object(
         .ok_or(QueryExecutionError::InvalidFilterError)?;
     let filter = build_filter_from_object(child_entity, object, schema)?;
 
-    Ok(EntityFilter::Child(
-        field_name,
-        EntityType::new(type_name.to_string()),
-        Box::new(filter),
-        EntityFilterDerivative::new(field.is_derived()),
-    ))
+    if child_entity.is_interface() {
+        Ok(EntityFilter::Or(
+            child_entity
+                .object_types(schema.schema())
+                .expect("Interface is not implemented by any types")
+                .iter()
+                .map(|et| {
+                    EntityFilter::Child(
+                        field_name.clone(),
+                        EntityType::new(et.name.to_string()),
+                        Box::new(filter.clone()),
+                        EntityFilterDerivative::new(field.is_derived()),
+                    )
+                })
+                .collect(),
+        ))
+    } else {
+        Ok(EntityFilter::Child(
+            field_name,
+            EntityType::new(type_name.to_string()),
+            Box::new(filter),
+            EntityFilterDerivative::new(field.is_derived()),
+        ))
+    }
 }
 
 /// Parses a list of GraphQL values into a vector of entity field values.

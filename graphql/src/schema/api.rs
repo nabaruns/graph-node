@@ -1097,6 +1097,199 @@ mod tests {
     }
 
     #[test]
+    fn api_schema_contains_interface_type_filter() {
+        let input_schema = parse_schema(
+            r#"
+              interface Review {
+                  id: ID!
+                  body: String!
+                  author: User!
+              }
+
+              type SongReview implements Review @entity {
+                  id: ID!
+                  body: String!
+                  author: User!
+              }
+
+              type BandReview implements Review @entity {
+                  id: ID!
+                  body: String!
+                  author: User!
+              }
+
+              type User @entity {
+                  id: ID!
+                  name: String!
+                  bandReviews: [BandReview] @derivedFrom(field: "author")
+                  songReviews: [SongReview] @derivedFrom(field: "author")
+                  reviews: [Review] @derivedFrom(field: "author")
+              }
+            "#,
+        )
+        .expect("Failed to parse input schema");
+        let schema = api_schema(&input_schema).expect("Failed to derived API schema");
+
+        let user_filter = schema
+            .get_named_type("User_filter")
+            .expect("User_filter type is missing in derived API schema");
+
+        let user_filter_type = match user_filter {
+            TypeDefinition::InputObject(t) => Some(t),
+            _ => None,
+        }
+        .expect("User_filter type is not an input object");
+
+        assert_eq!(
+            user_filter_type
+                .fields
+                .iter()
+                .map(|field| field.name.to_owned())
+                .collect::<Vec<String>>(),
+            [
+                "id",
+                "id_not",
+                "id_gt",
+                "id_lt",
+                "id_gte",
+                "id_lte",
+                "id_in",
+                "id_not_in",
+                "name",
+                "name_not",
+                "name_gt",
+                "name_lt",
+                "name_gte",
+                "name_lte",
+                "name_in",
+                "name_not_in",
+                "name_contains",
+                "name_contains_nocase",
+                "name_not_contains",
+                "name_not_contains_nocase",
+                "name_starts_with",
+                "name_starts_with_nocase",
+                "name_not_starts_with",
+                "name_not_starts_with_nocase",
+                "name_ends_with",
+                "name_ends_with_nocase",
+                "name_not_ends_with",
+                "name_not_ends_with_nocase",
+                "bandReviews_",
+                "songReviews_",
+                "reviews_",
+                "_change_block"
+            ]
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+        );
+
+        let reviews_field = user_filter_type
+            .fields
+            .iter()
+            .find(|field| field.name == "reviews_")
+            .expect("reviews_ field is missing");
+
+        assert_eq!(
+            reviews_field.value_type.to_string(),
+            String::from("Review_filter")
+        );
+
+        let review_filter = schema
+            .get_named_type("Review_filter")
+            .expect("Review_filter type is missing in derived API schema");
+
+        let review_filter_type = match review_filter {
+            TypeDefinition::InputObject(t) => Some(t),
+            _ => None,
+        }
+        .expect("Review_filter type is not an input object");
+
+        assert_eq!(
+            review_filter_type
+                .fields
+                .iter()
+                .map(|field| field.name.to_owned())
+                .collect::<Vec<String>>(),
+            [
+                "id",
+                "id_not",
+                "id_gt",
+                "id_lt",
+                "id_gte",
+                "id_lte",
+                "id_in",
+                "id_not_in",
+                "body",
+                "body_not",
+                "body_gt",
+                "body_lt",
+                "body_gte",
+                "body_lte",
+                "body_in",
+                "body_not_in",
+                "body_contains",
+                "body_contains_nocase",
+                "body_not_contains",
+                "body_not_contains_nocase",
+                "body_starts_with",
+                "body_starts_with_nocase",
+                "body_not_starts_with",
+                "body_not_starts_with_nocase",
+                "body_ends_with",
+                "body_ends_with_nocase",
+                "body_not_ends_with",
+                "body_not_ends_with_nocase",
+                // I'm not sure if this is the right behavior, I think there should be no author and author_* fields, just author_
+                "author",
+                "author_not",
+                "author_gt",
+                "author_lt",
+                "author_gte",
+                "author_lte",
+                "author_in",
+                "author_not_in",
+                "author_contains",
+                "author_contains_nocase",
+                "author_not_contains",
+                "author_not_contains_nocase",
+                "author_starts_with",
+                "author_starts_with_nocase",
+                "author_not_starts_with",
+                "author_not_starts_with_nocase",
+                "author_ends_with",
+                "author_ends_with_nocase",
+                "author_not_ends_with",
+                "author_not_ends_with_nocase",
+                "author_",
+                "_change_block"
+            ]
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+        );
+
+        let change_block_filter = user_filter_type
+            .fields
+            .iter()
+            .find(move |p| match p.name.as_str() {
+                "_change_block" => true,
+                _ => false,
+            })
+            .expect("_change_block field is missing in User_filter");
+
+        match &change_block_filter.value_type {
+            Type::NamedType(name) => assert_eq!(name.as_str(), "BlockChangedFilter"),
+            _ => panic!("_change_block field is not a named type"),
+        }
+
+        schema
+            .get_named_type("BlockChangedFilter")
+            .expect("BlockChangedFilter type is missing in derived API schema");
+    }
+
+    #[test]
     fn api_schema_contains_object_fields_on_query_type() {
         let input_schema = parse_schema(
             "type User { id: ID!, name: String! } type UserProfile { id: ID!, title: String! }",
