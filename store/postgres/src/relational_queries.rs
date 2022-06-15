@@ -978,7 +978,8 @@ impl<'a> QueryFilter<'a> {
         attribute: &Attribute,
         entity_type: &'a EntityType,
         filter: &'a EntityFilter,
-        derivative: &'a EntityFilterDerivative,
+        // TODO: discuss the column swapping with David
+        _derivative: &'a EntityFilterDerivative,
         mut out: AstPass<Pg>,
     ) -> QueryResult<()> {
         let child_table = self
@@ -986,13 +987,13 @@ impl<'a> QueryFilter<'a> {
             .table_for_entity(entity_type)
             .expect("Table for child entity not found");
 
-        let child_prefix = "inner.";
+        let child_prefix = "i.";
 
         out.push_sql("exists (select 1");
 
         out.push_sql(" from ");
         out.push_sql(child_table.qualified_name.as_str());
-        out.push_sql(" inner");
+        out.push_sql(" as i");
 
         out.push_sql(" where ");
 
@@ -1005,23 +1006,32 @@ impl<'a> QueryFilter<'a> {
         let child_column = child_table.primary_key();
 
         // Join parent and child table
-        let outer_prefix: &str;
-        let outer_column: &Column;
-        let inner_prefix: &str;
-        let inner_column: &Column;
+        let outer_prefix = parent_prefix;
+        let outer_column = parent_column;
+        let inner_prefix = child_prefix;
+        let inner_column = child_column;
 
-        if derivative.is_derived() {
-            outer_prefix = parent_prefix;
-            outer_column = parent_column;
-            inner_prefix = child_prefix;
-            inner_column = child_column;
-        } else {
-            // If parent is derived from child, then we need to swap the join order
-            outer_prefix = child_prefix;
-            outer_column = child_column;
-            inner_prefix = parent_prefix;
-            inner_column = parent_column;
-        }
+        //
+        // I thought we have to swap the join order when parent is derived from child, but it seems to work fine without swapping.
+        //
+        // let outer_prefix: &str;
+        // let outer_column: &Column;
+        // let inner_prefix: &str;
+        // let inner_column: &Column;
+        // if derivative.is_derived() {
+        //     println!("derivative.is_derived");
+        //     outer_prefix = parent_prefix;
+        //     outer_column = parent_column;
+        //     inner_prefix = child_prefix;
+        //     inner_column = child_column;
+        // } else {
+        //     println!("NOT derivative.is_derived");
+        //     // If parent is derived from child, then we need to swap the join order
+        //     outer_prefix = parent_prefix;
+        //     outer_column = parent_column;
+        //     inner_prefix = child_prefix;
+        //     inner_column = child_column;
+        // }
 
         if outer_column.is_list() {
             // child.id = any(parent.children)

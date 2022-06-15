@@ -1000,6 +1000,17 @@ mod tests {
             .collect::<Vec<String>>()
         );
 
+        let pets_field = user_filter_type
+            .fields
+            .iter()
+            .find(|field| field.name == "pets_")
+            .expect("pets_ field is missing");
+
+        assert_eq!(
+            pets_field.value_type.to_string(),
+            String::from("Pet_filter")
+        );
+
         let pet_filter = schema
             .get_named_type("Pet_filter")
             .expect("Pet_filter type is missing in derived API schema");
