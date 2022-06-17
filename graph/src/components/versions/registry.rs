@@ -2,22 +2,23 @@ use crate::prelude::FeatureFlag;
 use lazy_static::lazy_static;
 use semver::{Version, VersionReq};
 use std::collections::HashMap;
-// use std::fmt;
-// use std::hash::Hash;
 
 lazy_static! {
     pub static ref VERSIONS: HashMap<Version, Vec<FeatureFlag>> = {
-        let supported_versions: Vec<(&str, Vec<FeatureFlag>)> = vec![
+        let mut supported_versions: Vec<(Version, Vec<FeatureFlag>)> = vec![
             // baseline version
-            ("1.0.0", vec![]),
+            (Version::new(1, 0, 0), vec![]),
             // Versions with feature flags
-            ("1.1.0", vec![FeatureFlag::BasicOrdering])
+            (Version::new(1, 1, 0), vec![FeatureFlag::BasicOrdering])
         ];
 
         let mut map = HashMap::new();
 
+        // Sort version by major, minor, patch, from higher to lower.
+        supported_versions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
         for (version, flags) in supported_versions {
-            map.insert(Version::parse(version).expect("Version is incorrect"), flags);
+            map.insert(version, flags);
         }
 
         map
@@ -26,9 +27,8 @@ lazy_static! {
     static ref LATEST_VERSION: String = {
         let keys: Vec<Version> = VERSIONS.clone().into_keys().collect();
 
-        let last_version = keys.last().unwrap();
-
-        last_version.to_string()
+        // Versions are sorted by major, minor, patch, from higher to lower.
+        keys.first().unwrap().to_string()
     };
 }
 
