@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{
     data::graphql::shape_hash::shape_hash,
-    prelude::{q, r, DeploymentHash, SubgraphName, Version, VersionNumber, ENV_VARS},
+    prelude::{q, r, ApiVersion, DeploymentHash, SubgraphName, ENV_VARS},
 };
 
 fn deserialize_number<'de, D>(deserializer: D) -> Result<q::Number, D::Error>
@@ -112,20 +112,15 @@ impl serde::ser::Serialize for QueryVariables {
 
 #[derive(Clone, Debug)]
 pub enum QueryTarget {
-    Name(SubgraphName, VersionNumber),
-    Deployment(DeploymentHash, VersionNumber),
+    Name(SubgraphName, ApiVersion),
+    Deployment(DeploymentHash, ApiVersion),
 }
 
 impl QueryTarget {
-    pub fn get_version_number(&self) -> VersionNumber {
+    pub fn get_version(&self) -> &ApiVersion {
         match self {
-            Self::Name(_, version) => version.clone(),
-            Self::Deployment(_, version) => version.clone(),
+            Self::Deployment(_, version) | Self::Name(_, version) => version,
         }
-    }
-
-    pub fn get_version(&self) -> Version {
-        Version::new(self.get_version_number())
     }
 }
 

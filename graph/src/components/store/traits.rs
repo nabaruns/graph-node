@@ -3,7 +3,7 @@ use web3::types::{Address, H256};
 use super::*;
 use crate::components::server::index_node::VersionInfo;
 use crate::components::transaction_receipt;
-use crate::components::versions::Version;
+use crate::components::versions::ApiVersion;
 use crate::data::subgraph::status;
 use crate::data::value::Word;
 use crate::data::{query::QueryTarget, subgraph::schema::*};
@@ -114,7 +114,7 @@ pub trait SubgraphStore: Send + Sync + 'static {
     fn api_schema(
         &self,
         subgraph_id: &DeploymentHash,
-        version: &Version,
+        api_version: &ApiVersion,
     ) -> Result<Arc<ApiSchema>, StoreError>;
 
     /// Return a `SubgraphFork`, derived from the user's `debug-fork` deployment argument,
@@ -415,7 +415,7 @@ pub trait QueryStore: Send + Sync {
     /// return details about it needed for executing queries
     async fn deployment_state(&self) -> Result<DeploymentState, QueryExecutionError>;
 
-    fn api_schema(&self, version: &Version) -> Result<Arc<ApiSchema>, QueryExecutionError>;
+    fn api_schema(&self, api_version: &ApiVersion) -> Result<Arc<ApiSchema>, QueryExecutionError>;
 
     fn network_name(&self) -> &str;
 

@@ -7,8 +7,8 @@ use diesel::r2d2::{ConnectionManager, PooledConnection};
 use graph::components::store::{EntityType, StoredDynamicDataSource};
 use graph::data::subgraph::status;
 use graph::prelude::{
-    tokio, CancelHandle, CancelToken, CancelableError, EntityOperation, PoolWaitStats,
-    SubgraphDeploymentEntity, Version, VersionNumber,
+    tokio, ApiVersion, CancelHandle, CancelToken, CancelableError, EntityOperation, PoolWaitStats,
+    SubgraphDeploymentEntity,
 };
 use lru_time_cache::LruCache;
 use rand::{seq::SliceRandom, thread_rng};
@@ -88,7 +88,7 @@ pub struct StoreInner {
     conn_round_robin_counter: AtomicUsize,
 
     /// A cache of commonly needed data about a subgraph.
-    subgraph_cache: Mutex<LruCache<(DeploymentHash, VersionNumber), SubgraphInfo>>,
+    subgraph_cache: Mutex<LruCache<(DeploymentHash, ApiVersion), SubgraphInfo>>,
 
     /// A cache for the layout metadata for subgraphs. The Store just
     /// hosts this because it lives long enough, but it is managed from
@@ -536,13 +536,13 @@ impl DeploymentStore {
         &self,
         conn: &PgConnection,
         site: &Site,
-        version: &Version,
+        api_version: &ApiVersion,
     ) -> Result<SubgraphInfo, StoreError> {
         if let Some(info) = self
             .subgraph_cache
             .lock()
             .unwrap()
-            .get(&(site.deployment.clone(), version.version.clone()))
+            .get(&(site.deployment.clone(), api_version.clone()))
         {
             return Ok(info.clone());
         }
@@ -558,7 +558,7 @@ impl DeploymentStore {
         // API schema have a @subgraphId directive as well
         let mut schema = input_schema.clone();
         schema.document =
-            api_schema(&schema.document, version).map_err(|e| StoreError::Unknown(e.into()))?;
+            api_schema(&schema.document, api_version).map_err(|e| StoreError::Unknown(e.into()))?;
         schema.add_subgraph_id_directives(site.deployment.clone());
 
         let info = SubgraphInfo {
@@ -572,10 +572,10 @@ impl DeploymentStore {
 
         // Insert the schema into the cache.
         let mut cache = self.subgraph_cache.lock().unwrap();
-        cache.insert((site.deployment.clone(), version.version.clone()), info);
+        cache.insert((site.deployment.clone(), api_version.clone()), info);
 
         Ok(cache
-            .get(&(site.deployment.clone(), version.version.clone()))
+            .get(&(site.deployment.clone(), api_version.clone()))
             .unwrap()
             .clone())
     }
@@ -583,19 +583,19 @@ impl DeploymentStore {
     pub(crate) fn subgraph_info(
         &self,
         site: &Site,
-        version: &Version,
+        api_version: &ApiVersion,
     ) -> Result<SubgraphInfo, StoreError> {
         if let Some(info) = self
             .subgraph_cache
             .lock()
             .unwrap()
-            .get(&(site.deployment.clone(), version.version.clone()))
+            .get(&(site.deployment.clone(), api_version.clone()))
         {
             return Ok(info.clone());
         }
 
         let conn = self.get_conn()?;
-        self.subgraph_info_with_conn(&conn, site, version)
+        self.subgraph_info_with_conn(&conn, site, api_version)
     }
 
     fn block_ptr_with_conn(

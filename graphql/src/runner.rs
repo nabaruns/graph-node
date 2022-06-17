@@ -158,7 +158,7 @@ where
         let store = self.store.query_store(target.clone(), false).await?;
         let state = store.deployment_state().await?;
         let network = Some(store.network_name().to_string());
-        let schema = store.api_schema(&target.get_version())?;
+        let schema = store.api_schema(target.get_version())?;
 
         // Test only, see c435c25decbc4ad7bbbadf8e0ced0ff2
         #[cfg(debug_assertions)]
