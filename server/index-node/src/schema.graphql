@@ -43,7 +43,7 @@ type Query {
     network: String!
     blockHash: Bytes!
   ): [CachedEthereumCall!]
-  subgraphVersions(subgraphId: String!): [SubgraphVersion!]!
+  apiVersions(subgraphId: String!): [SubgraphVersion!]!
 }
 
 type SubgraphIndexingStatus {
@@ -175,7 +175,7 @@ type ProofOfIndexingResult {
   proofOfIndexing: Bytes
 }
 
-type SubgraphVersion {
+type ApiVersion {
   """
   Version number in SemVer format
   """
