@@ -1,4 +1,5 @@
 use graph::data::graphql::ext::TypeDefinitionExt;
+use graph::data::query::QueryTarget;
 use graph::data::subgraph::schema::DeploymentCreate;
 use graph_chain_ethereum::{Mapping, MappingABI};
 use graph_mock::MockMetricsRegistry;
@@ -1402,7 +1403,10 @@ fn throttle_subscription_delivers() {
                 &*LOGGER,
                 store
                     .clone()
-                    .query_store(deployment.hash.clone().into(), true)
+                    .query_store(
+                        QueryTarget::Deployment(deployment.hash.clone().into(), Default::default()),
+                        true,
+                    )
                     .await
                     .unwrap(),
                 Duration::from_millis(500),

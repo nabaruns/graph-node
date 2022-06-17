@@ -363,7 +363,7 @@ where
                     LOAD_MANAGER.clone(),
                     METRICS_REGISTRY.clone(),
                 ));
-                let target = QueryTarget::Deployment(id.clone());
+                let target = QueryTarget::Deployment(id.clone(), Default::default());
                 let query = Query::new(query, variables);
 
                 runner
@@ -387,7 +387,10 @@ async fn run_subscription(
     let deployment = setup_readonly(store.as_ref()).await;
     let logger = Logger::root(slog::Discard, o!());
     let query_store = store
-        .query_store(deployment.hash.clone().into(), true)
+        .query_store(
+            QueryTarget::Deployment(deployment.hash.clone(), Default::default()),
+            true,
+        )
         .await
         .unwrap();
 
@@ -406,7 +409,10 @@ async fn run_subscription(
         max_skip: std::u32::MAX,
         result_size: result_size_metrics(),
     };
-    let schema = STORE.subgraph_store().api_schema(&deployment.hash).unwrap();
+    let schema = STORE
+        .subgraph_store()
+        .api_schema(&deployment.hash, &Default::default())
+        .unwrap();
 
     execute_subscription(Subscription { query }, schema.clone(), options)
 }
@@ -830,7 +836,7 @@ fn instant_timeout() {
         match first_result(
             execute_subgraph_query_with_deadline(
                 query,
-                deployment.hash.into(),
+                QueryTarget::Deployment(deployment.hash.into(), Default::default()),
                 Some(Instant::now()),
             )
             .await,
