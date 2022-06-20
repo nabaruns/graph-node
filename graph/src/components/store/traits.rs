@@ -415,7 +415,7 @@ pub trait QueryStore: Send + Sync {
     /// return details about it needed for executing queries
     async fn deployment_state(&self) -> Result<DeploymentState, QueryExecutionError>;
 
-    fn api_schema(&self, api_version: &ApiVersion) -> Result<Arc<ApiSchema>, QueryExecutionError>;
+    fn api_schema(&self) -> Result<Arc<ApiSchema>, QueryExecutionError>;
 
     fn network_name(&self) -> &str;
 
