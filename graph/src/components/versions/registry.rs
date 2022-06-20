@@ -32,7 +32,7 @@ lazy_static! {
     };
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ApiVersion {
     pub version: Version,
     features: Vec<FeatureFlag>,

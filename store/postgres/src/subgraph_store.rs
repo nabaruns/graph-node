@@ -566,7 +566,7 @@ impl SubgraphStoreInner {
     ) -> Result<DeploymentLocator, StoreError> {
         let src = self.find_site(src.id.into())?;
         let src_store = self.for_site(src.as_ref())?;
-        let src_info = src_store.subgraph_info(src.as_ref(), &Default::default())?;
+        let src_info = src_store.subgraph_info(src.as_ref())?;
         let src_loc = DeploymentLocator::from(src.as_ref());
 
         let dst = Arc::new(self.primary_conn()?.copy_site(&src, shard.clone())?);
@@ -864,7 +864,7 @@ impl SubgraphStoreInner {
                 .ok_or_else(|| constraint_violation!("no chain info for {}", deployment_id))?;
             let latest_ethereum_block_number =
                 chain.latest_block.as_ref().map(|block| block.number());
-            let subgraph_info = store.subgraph_info(site.as_ref(), &Default::default())?;
+            let subgraph_info = store.subgraph_info(site.as_ref())?;
             let network = site.network.clone();
 
             let info = VersionInfo {
@@ -1132,7 +1132,7 @@ impl SubgraphStoreTrait for SubgraphStore {
 
     fn input_schema(&self, id: &DeploymentHash) -> Result<Arc<Schema>, StoreError> {
         let (store, site) = self.store(id)?;
-        let info = store.subgraph_info(&site, &Default::default())?;
+        let info = store.subgraph_info(&site)?;
         Ok(info.input)
     }
 
@@ -1142,8 +1142,8 @@ impl SubgraphStoreTrait for SubgraphStore {
         version: &ApiVersion,
     ) -> Result<Arc<ApiSchema>, StoreError> {
         let (store, site) = self.store(id)?;
-        let info = store.subgraph_info(&site, version)?;
-        Ok(info.api)
+        let info = store.subgraph_info(&site)?;
+        Ok(info.api.get(version).unwrap().clone())
     }
 
     fn debug_fork(
@@ -1152,7 +1152,7 @@ impl SubgraphStoreTrait for SubgraphStore {
         logger: Logger,
     ) -> Result<Option<Arc<dyn SubgraphFork>>, StoreError> {
         let (store, site) = self.store(id)?;
-        let info = store.subgraph_info(&site, &Default::default())?;
+        let info = store.subgraph_info(&site)?;
         let fork_id = info.debug_fork;
         let schema = info.input;
 
