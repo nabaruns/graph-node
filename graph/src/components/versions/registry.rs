@@ -15,7 +15,7 @@ lazy_static! {
         let mut map = HashMap::new();
 
         // Sort version by major, minor, patch, from higher to lower.
-        supported_versions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        supported_versions.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
 
         for (version, flags) in supported_versions {
             map.insert(version, flags);
