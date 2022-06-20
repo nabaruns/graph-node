@@ -689,7 +689,7 @@ impl SubgraphStoreInner {
             QueryTarget::Deployment(id, _) => id,
         };
 
-        let (store, site) = self.store(&id)?; // TODO: maybe use a tuple (id, version) here?
+        let (store, site) = self.store(&id)?;
         let replica = store.replica_for_query(for_subscription)?;
 
         Ok((store.clone(), site, replica))
