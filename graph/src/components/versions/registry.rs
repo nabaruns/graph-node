@@ -58,6 +58,13 @@ impl ApiVersion {
         }
     }
 
+    pub fn from_version(version: &Version) -> Result<ApiVersion, String> {
+        ApiVersion::new(
+            &VersionReq::parse(version.to_string().as_str())
+                .map_err(|error| format!("Invalid version requirement: {}", error))?,
+        )
+    }
+
     pub fn supports(&self, feature: FeatureFlag) -> bool {
         self.features.contains(&feature)
     }

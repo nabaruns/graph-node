@@ -559,9 +559,7 @@ impl DeploymentStore {
         let mut api: HashMap<ApiVersion, Arc<ApiSchema>> = HashMap::new();
 
         for (version, _) in VERSIONS.iter() {
-            let api_version =
-                ApiVersion::new(&VersionReq::from_str(version.to_string().as_str()).unwrap())
-                    .unwrap();
+            let api_version = ApiVersion::from_version(version).expect("Invalid API version");
             let mut schema = input_schema.clone();
             schema.document = api_schema(&schema.document, &api_version)
                 .map_err(|e| StoreError::Unknown(e.into()))?;
