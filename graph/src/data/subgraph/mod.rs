@@ -12,7 +12,8 @@ pub use features::{SubgraphFeature, SubgraphFeatureValidationError};
 
 use anyhow::ensure;
 use anyhow::{anyhow, Error};
-use futures03::{future::try_join3, stream::FuturesOrdered, TryStreamExt as _};
+use futures03::stream::FuturesUnordered;
+use futures03::{future::try_join4, stream::FuturesOrdered, TryStreamExt as _};
 use semver::Version;
 use serde::de;
 use serde::ser;
@@ -31,6 +32,7 @@ use crate::data::{
     schema::{Schema, SchemaImportError, SchemaValidationError},
     subgraph::features::validate_subgraph_features,
 };
+use crate::offchain;
 use crate::prelude::{r, CheapClone, ENV_VARS};
 use crate::{blockchain::DataSource, data::graphql::TryFromValue};
 use crate::{blockchain::DataSourceTemplate as _, data::query::QueryExecutionError};
@@ -499,7 +501,7 @@ impl Graft {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BaseSubgraphManifest<C, S, D, T> {
+pub struct BaseSubgraphManifest<C, S, D, T, O> {
     pub id: DeploymentHash,
     pub spec_version: Version,
     #[serde(default)]
@@ -511,6 +513,7 @@ pub struct BaseSubgraphManifest<C, S, D, T> {
     pub graft: Option<Graft>,
     #[serde(default)]
     pub templates: Vec<T>,
+    pub offchain_data_sources: Vec<O>,
     #[serde(skip_serializing, default)]
     pub chain: PhantomData<C>,
 }
@@ -521,6 +524,7 @@ type UnresolvedSubgraphManifest<C> = BaseSubgraphManifest<
     UnresolvedSchema,
     <C as Blockchain>::UnresolvedDataSource,
     <C as Blockchain>::UnresolvedDataSourceTemplate,
+    offchain::UnresolvedDataSource,
 >;
 
 /// SubgraphManifest validated with IPFS links resolved
@@ -529,6 +533,7 @@ pub type SubgraphManifest<C> = BaseSubgraphManifest<
     Schema,
     <C as Blockchain>::DataSource,
     <C as Blockchain>::DataSourceTemplate,
+    offchain::DataSource,
 >;
 
 /// Unvalidated SubgraphManifest
@@ -714,6 +719,7 @@ impl<C: Blockchain> UnresolvedSubgraphManifest<C> {
             data_sources,
             graft,
             templates,
+            offchain_data_sources,
             chain,
         } = self;
 
@@ -727,7 +733,7 @@ impl<C: Blockchain> UnresolvedSubgraphManifest<C> {
             ));
         }
 
-        let (schema, data_sources, templates) = try_join3(
+        let (schema, data_sources, templates, offchain_data_sources) = try_join4(
             schema.resolve(id.clone(), &resolver, logger),
             data_sources
                 .into_iter()
@@ -738,6 +744,11 @@ impl<C: Blockchain> UnresolvedSubgraphManifest<C> {
                 .into_iter()
                 .map(|template| template.resolve(&resolver, logger))
                 .collect::<FuturesOrdered<_>>()
+                .try_collect::<Vec<_>>(),
+            offchain_data_sources
+                .into_iter()
+                .map(|ds| ds.resolve(&resolver, logger))
+                .collect::<FuturesUnordered<_>>()
                 .try_collect::<Vec<_>>(),
         )
         .await?;
@@ -763,6 +774,7 @@ impl<C: Blockchain> UnresolvedSubgraphManifest<C> {
             data_sources,
             graft,
             templates,
+            offchain_data_sources,
             chain,
         })
     }
