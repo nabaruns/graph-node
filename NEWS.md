@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Max gas is set to a very high value by default, effectively disabling
+  it until the costs are better benchmarked and refined.
 - Pipeline store writes #3084 #3177
 
 ## 0.26.0
